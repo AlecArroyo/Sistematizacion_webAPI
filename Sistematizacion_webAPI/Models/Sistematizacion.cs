@@ -35,6 +35,12 @@ namespace Sistematizacion_webAPI.Models
 
         [BsonElement("notas")]
         public string Notas { get; set; } = string.Empty;
+
+        [BsonElement("poblacion")]
+        public List<string> Poblacion { get; set; } = new();
+
+        [BsonElement("distrito")]
+        public string Distrito { get; set; } = string.Empty;
     }
 
     public class AudiosVideos
