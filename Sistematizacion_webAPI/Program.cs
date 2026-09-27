@@ -16,6 +16,7 @@ builder.Services.AddSingleton<IMongoClient>(sp =>
 });
 
 builder.Services.AddSingleton<SistematizacionService>();
+builder.Services.AddSingleton<EstudianteService>();
 
 builder.Services.AddCors(options =>
 {
