@@ -59,6 +59,10 @@ namespace Sistematizacion_webAPI.Models
 
         [BsonElement("propietario")]
         public string Propietario { get; set; } = string.Empty;
+
+        [BsonElement("propietarioId")]
+        [BsonRepresentation(BsonType.ObjectId)]
+        public string? PropietarioId { get; set; }
     }
 
     public class Consentimientos

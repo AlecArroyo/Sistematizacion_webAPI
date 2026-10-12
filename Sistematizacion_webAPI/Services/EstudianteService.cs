@@ -23,6 +23,12 @@ namespace Sistematizacion_webAPI.Services
         public async Task<Estudiante?> GetByIdAsync(string id) =>
             await _estudiantes.Find(e => e.Id == id).FirstOrDefaultAsync();
 
+        public async Task<List<Estudiante>> GetByIdsAsync(IEnumerable<string> ids)
+        {
+            var filter = Builders<Estudiante>.Filter.In(e => e.Id, ids);
+            return await _estudiantes.Find(filter).ToListAsync();
+        }
+
         public async Task CreateAsync(Estudiante nuevoEstudiante) =>
             await _estudiantes.InsertOneAsync(nuevoEstudiante);
 
