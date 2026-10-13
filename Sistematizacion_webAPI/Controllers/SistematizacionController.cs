@@ -14,15 +14,26 @@ namespace Sistematizacion_webAPI.Controllers
 
         private readonly CorreoService _correo;
 
+        private readonly IConfiguration _config;
+
+        private readonly ILogger<SistematizacionController> _log;
+
+        // Interruptor general: si es false, todo se guarda pero NO se envía ningún correo
+        private readonly bool sendEmails;
 
         public SistematizacionController(
             SistematizacionService service,
             EstudianteService estudianteService,
-            CorreoService correo)
+            CorreoService correo,
+            IConfiguration config,
+            ILogger<SistematizacionController> log)
         {
             _service = service;
             _estudianteService = estudianteService;
             _correo = correo;
+            _config = config;
+            _log = log;
+            sendEmails = config.GetValue<bool>("Correo:SendEmails");
         }
 
         // GET api/sistematizacion
@@ -47,7 +58,31 @@ namespace Sistematizacion_webAPI.Controllers
         public async Task<ActionResult> Create(Sistematizacion sistematizacion)
         {
             await _service.CreateAsync(sistematizacion);
+
+            if (sendEmails)
+                _ = Task.Run(() => NotificarProfesoraAsync(sistematizacion));
+
             return CreatedAtAction(nameof(GetById), new { id = sistematizacion.Id }, sistematizacion);
+        }
+
+        private async Task NotificarProfesoraAsync(Sistematizacion s)
+        {
+            try
+            {
+                var destino = _config["Correo:ProfesoraEmail"];
+                if (string.IsNullOrWhiteSpace(destino))
+                {
+                    _log.LogWarning("sendEmails está activo pero falta Correo:ProfesoraEmail");
+                    return;
+                }
+
+                var html = PlantillaCorreo.NuevaSistematizacion(s);
+                await _correo.EnviarAsync("Profesora TCU-782", destino, $"Nueva sistematización: {s.Actividad}", html);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "No se pudo notificar a la profesora");
+            }
         }
 
         // PUT api/sistematizacion/{id}

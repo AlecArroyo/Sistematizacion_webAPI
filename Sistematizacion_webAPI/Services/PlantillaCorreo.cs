@@ -1,5 +1,6 @@
 ﻿using System.Net;
-
+using System.Text;
+using Sistematizacion_webAPI.Models;
 namespace Sistematizacion_webAPI.Services
 {
     public static class PlantillaCorreo
@@ -11,5 +12,40 @@ namespace Sistematizacion_webAPI.Services
             <p>Por favor súbelo al Drive en este enlace:<br>
                <a href=""{link}"">{link}</a></p>
             <p>¡Gracias!<br>TCU-782</p>";
+
+        public static string NuevaSistematizacion(Sistematizacion s)
+        {
+            var items = s.AudiosVideos.Items;
+            var lista = new StringBuilder();
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                lista.Append($"<li>{WebUtility.HtmlEncode(items[i].Titulo)} — {WebUtility.HtmlEncode(items[i].Propietario)}</li>");
+            }
+
+            var material = items.Count > 0
+                ? $"<ul>{lista}</ul>"
+                : "<p>No se registró material audiovisual.</p>";
+
+            return $@"
+               <p>{WebUtility.HtmlEncode(s.Notas)}</p>
+               <p>Se registró una nueva sistematización.</p>
+                 <p><strong>Actividad:</strong> {WebUtility.HtmlEncode(s.Actividad)}<br>
+                <strong>Registrada por:</strong> {WebUtility.HtmlEncode(s.Nombre)}<br>
+                  <strong>Comunidad:</strong> {WebUtility.HtmlEncode(s.Comunidad)}<br>
+              <strong>Distrito:</strong> {WebUtility.HtmlEncode(s.Distrito)}<br>
+               <strong>Participantes:</strong> {s.Participantes}<br>
+               <strong>Horas:</strong> {s.Horas}</p>
+               <p><strong>Material audiovisual:</strong></p>
+                 {material}
+                 <p>TCU-782</p>";
+        }
+
+
+
     }
+
+
+
+
 }

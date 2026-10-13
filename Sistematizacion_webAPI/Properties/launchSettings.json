@@ -36,6 +36,18 @@
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
+    },
+    "https-PRODUCCION": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "applicationUrl": "https://localhost:7099;http://localhost:5054",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "MongoDbSettings__DatabaseName": "TcuDB",
+        "Correo__SendEmails": "false"
+      }
     }
   }
 }
