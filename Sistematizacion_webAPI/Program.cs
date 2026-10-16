@@ -18,6 +18,7 @@ builder.Services.AddSingleton<IMongoClient>(sp =>
 builder.Services.AddSingleton<SistematizacionService>();
 builder.Services.AddSingleton<EstudianteService>();
 builder.Services.AddSingleton<CorreoService>();
+builder.Services.AddSingleton<ConfigEmailService>();
 
 builder.Services.AddCors(options =>
 {

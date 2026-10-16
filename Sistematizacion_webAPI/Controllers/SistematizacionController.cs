@@ -9,31 +9,32 @@ namespace Sistematizacion_webAPI.Controllers
     public class SistematizacionController : ControllerBase
     {
         private readonly SistematizacionService _service;
-
         private readonly EstudianteService _estudianteService;
-
         private readonly CorreoService _correo;
-
+        private readonly ConfigEmailService _configEmailService;
         private readonly IConfiguration _config;
-
         private readonly ILogger<SistematizacionController> _log;
 
-        // Interruptor general: si es false, todo se guarda pero NO se envía ningún correo
-        private readonly bool sendEmails;
+        private record ResultadoNotificacion(
+            List<string> Enviados,
+            List<string> Fallidos,
+            List<string> Omitidos,
+            List<string> SinAsignar);
 
         public SistematizacionController(
             SistematizacionService service,
             EstudianteService estudianteService,
             CorreoService correo,
+            ConfigEmailService configEmailService,
             IConfiguration config,
             ILogger<SistematizacionController> log)
         {
             _service = service;
             _estudianteService = estudianteService;
             _correo = correo;
+            _configEmailService = configEmailService;
             _config = config;
             _log = log;
-            sendEmails = config.GetValue<bool>("Correo:SendEmails");
         }
 
         // GET api/sistematizacion
@@ -59,30 +60,10 @@ namespace Sistematizacion_webAPI.Controllers
         {
             await _service.CreateAsync(sistematizacion);
 
-            if (sendEmails)
-                _ = Task.Run(() => NotificarProfesoraAsync(sistematizacion));
+            // La revisión del interruptor ocurre dentro del método
+            _ = Task.Run(() => NotificarProfesoraAsync(sistematizacion));
 
             return CreatedAtAction(nameof(GetById), new { id = sistematizacion.Id }, sistematizacion);
-        }
-
-        private async Task NotificarProfesoraAsync(Sistematizacion s)
-        {
-            try
-            {
-                var destino = _config["Correo:ProfesoraEmail"];
-                if (string.IsNullOrWhiteSpace(destino))
-                {
-                    _log.LogWarning("sendEmails está activo pero falta Correo:ProfesoraEmail");
-                    return;
-                }
-
-                var html = PlantillaCorreo.NuevaSistematizacion(s);
-                await _correo.EnviarAsync("Profesora TCU-782", destino, $"Nueva sistematización: {s.Actividad}", html);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "No se pudo notificar a la profesora");
-            }
         }
 
         // PUT api/sistematizacion/{id}
@@ -116,11 +97,9 @@ namespace Sistematizacion_webAPI.Controllers
             if (gira is null) return NotFound();
 
             var items = gira.AudiosVideos.Items;
-
             var ids = new HashSet<string>();
             var sinAsignar = new HashSet<string>();
 
-            // Separar: los que tienen id y los que no
             for (int i = 0; i < items.Count; i++)
             {
                 var item = items[i];
@@ -131,10 +110,7 @@ namespace Sistematizacion_webAPI.Controllers
                     sinAsignar.Add(item.Propietario);
             }
 
-            // Buscar a esas personas en la colección de estudiantes
             var estudiantes = await _estudianteService.GetByIdsAsync(ids);
-
-            // Armar la respuesta con nombre completo y correo
             var destinatarios = new List<object>();
 
             for (int i = 0; i < estudiantes.Count; i++)
@@ -153,17 +129,105 @@ namespace Sistematizacion_webAPI.Controllers
             return Ok(new { gira = gira.Actividad, destinatarios, sinAsignar });
         }
 
-        // TEMPORAL: borrar después de probar
-        [HttpPost("probar-correo")]
-        public async Task<ActionResult> ProbarCorreo([FromQuery] string para)
+        // POST api/sistematizacion/{id}/notificar
+        [HttpPost("{id}/notificar")]
+        public async Task<ActionResult> Notificar(string id)
         {
-            var html = "<p>Hola, si lees esto el envío funciona.</p>";
-            var ok = await _correo.EnviarAsync("Prueba", para, "Prueba TCU-782", html);
+            var cfg = await LeerConfigAsync();
 
-            return ok ? Ok("Enviado") : StatusCode(500, "Falló, revisa el log");
+            if (!cfg.EnviarCorreos)
+                return Conflict(new { mensaje = "El envío de correos está desactivado." });
+
+            var gira = await _service.GetByIdAsync(id);
+            if (gira is null) return NotFound();
+
+            var resultado = await NotificarPersonasConMaterialAsync(gira, cfg);
+            return Ok(resultado);
         }
 
+        // Lee la configuración de Mongo y aplica el seguro local
+        private async Task<ConfigEmail> LeerConfigAsync()
+        {
+            var cfg = await _configEmailService.GetAsync();
 
+            // Seguro local: si Correo:Habilitado es false, nada se envía,
+            // sin importar lo que diga la base de datos
+            if (!_config.GetValue<bool>("Correo:Habilitado", true))
+                cfg.EnviarCorreos = false;
 
+            return cfg;
+        }
+
+        // Correo a la profesora cuando se sube una sistematización
+        private async Task NotificarProfesoraAsync(Sistematizacion s)
+        {
+            try
+            {
+                var cfg = await LeerConfigAsync();
+                if (!cfg.EnviarCorreos) return;
+
+                if (string.IsNullOrWhiteSpace(cfg.CorreoProfesora))
+                {
+                    _log.LogWarning("Envío activo pero no hay correo de la profesora en la configuración");
+                    return;
+                }
+
+                var html = PlantillaCorreo.NuevaSistematizacion(s);
+                await _correo.EnviarAsync("Profesora TCU-782", cfg.CorreoProfesora,
+                    $"Nueva sistematización: {s.Actividad}", html);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "No se pudo notificar a la profesora");
+            }
+        }
+
+        // Correo a las personas con material audiovisual de una gira
+        private async Task<ResultadoNotificacion> NotificarPersonasConMaterialAsync(Sistematizacion s, ConfigEmail cfg)
+        {
+            var enviados = new List<string>();
+            var fallidos = new List<string>();
+            var omitidos = new List<string>();
+            var sinAsignar = new HashSet<string>();
+            var ids = new HashSet<string>();
+
+            var items = s.AudiosVideos?.Items;
+            if (items is not null)
+            {
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (!string.IsNullOrEmpty(items[i].PropietarioId))
+                        ids.Add(items[i].PropietarioId!);
+                    else
+                        sinAsignar.Add(items[i].Propietario);
+                }
+            }
+
+            var estudiantes = await _estudianteService.GetByIdsAsync(ids);
+            var link = cfg.LinkDrive;                               // <- ahora viene de Mongo
+            var destinoPrueba = _config["Correo:DestinoPrueba"];    // sigue siendo solo local
+
+            for (int i = 0; i < estudiantes.Count; i++)
+            {
+                var e = estudiantes[i];
+                var nombre = $"{e.Nombre} {e.Apellido1} {e.Apellido2}".Trim();
+
+                if (!e.IsActive)
+                {
+                    omitidos.Add(nombre);
+                    continue;
+                }
+
+                var destino = string.IsNullOrWhiteSpace(destinoPrueba) ? e.Email : destinoPrueba;
+                var html = PlantillaCorreo.MaterialGira(nombre, s.Actividad, link);
+                var ok = await _correo.EnviarAsync(nombre, destino,
+                    $"Material audiovisual de la gira {s.Actividad}", html);
+
+                if (ok) enviados.Add(nombre);
+                else fallidos.Add(nombre);
+            }
+
+            return new ResultadoNotificacion(enviados, fallidos, omitidos, sinAsignar.ToList());
+        }
     }
 }
